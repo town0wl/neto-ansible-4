@@ -1,0 +1,5 @@
+---
+elastic-host-ip: <elastic-host-ip>
+kibana-host-ip: <kibana-host-ip>
+ya_user: <user>
+ya_key_file: <key_file>
