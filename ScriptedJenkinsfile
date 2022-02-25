@@ -1,0 +1,37 @@
+ansiColor('xterm') {
+node("ansible"){
+    prod_run=true
+    stage("Git checkout"){
+        git branch: 'main', credentialsId: 'public_git', url: 'https://github.com/town0wl/neto-ansible-4'
+    }
+    stage("Create VMs"){
+        sh '$HOME/yandex-cloud/bin/yc compute instance create     --name jelastic     --cores "4"     --memory "8"    --zone ru-central1-c     --network-interface subnet-name=default-ru-central1-c,nat-ip-version=ipv4     --create-boot-disk image-folder-id=standard-images,image-family=centos-7     --ssh-key $HOME/rsa_pub_for_yandex'
+        sh '$HOME/yandex-cloud/bin/yc compute instance create     --name jkibana     --cores "4"     --memory "8"    --zone ru-central1-c     --network-interface subnet-name=default-ru-central1-c,nat-ip-version=ipv4     --create-boot-disk image-folder-id=standard-images,image-family=centos-7     --ssh-key $HOME/rsa_pub_for_yandex'
+        sh 'sed -i "s/<elastic-host-ip>/$($HOME/yandex-cloud/bin/yc compute instance get jelastic | grep -A 1 "one_to_one_nat:" | cut -d: -f2 | xargs)/" inventory/test_env/group_vars/all.yml'
+        sh 'sed -i "s/<kibana-host-ip>/$($HOME/yandex-cloud/bin/yc compute instance get jelastic | grep -A 1 "one_to_one_nat:" | cut -d: -f2 | xargs)/" inventory/test_env/group_vars/all.yml'
+        sh 'cat inventory/test_env/group_vars/all.yml'
+        sh 'ssh-keyscan $($HOME/yandex-cloud/bin/yc compute instance get jelastic | grep -A 1 "one_to_one_nat:" | cut -d: -f2 | xargs) 2>/dev/null >> ~/.ssh/known_hosts'
+        sh 'ssh-keyscan $($HOME/yandex-cloud/bin/yc compute instance get jelastic | grep -A 1 "one_to_one_nat:" | cut -d: -f2 | xargs) 2>/dev/null >> ~/.ssh/known_hosts'
+    }
+    stage("Download roles"){
+        sh 'ansible-galaxy install -r requirements.yml -p roles'
+    }
+    stage("Run playbook"){
+        withCredentials([sshUserPrivateKey(credentialsId: 'ya_key', keyFileVariable: 'YA_SECRET_KEY', usernameVariable: 'demo')]) {
+            sh 'sed -i "s/<user>/yc-user/" inventory/test_env/group_vars/all.yml'
+            sh 'sed -i "s#<key_file>#$YA_SECRET_KEY#" inventory/test_env/group_vars/all.yml'
+            sh '[ ! -d files ] && mkdir files || true'
+            if (prod_run){
+                sh 'ansible-playbook site.yml -i inventory/test_env'
+            }
+            else{
+                sh 'ansible-playbook site.yml -i inventory/test_env --check --diff'
+            }
+        }
+    }
+    stage("Remove VMs"){
+        sh '$HOME/yandex-cloud/bin/yc compute instance delete jelastic'
+        sh '$HOME/yandex-cloud/bin/yc compute instance delete jkibana'
+    }
+}
+}
